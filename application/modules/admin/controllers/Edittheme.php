@@ -138,21 +138,24 @@ class EditTheme extends MX_Controller
     /**
      * Get the config name out of the path
      *
-     * @param  String $path
+     * @param String $path
      * @return String
      */
-    private function getConfigName($path = "")
+    private function getConfigName(string $path = ""): string
     {
         return preg_replace("/application\/themes\/" . $this->theme . "\/config\/([A-Za-z0-9_-]*)\.php/", "$1", $path);
     }
 
     public function save($theme = false, $name = false)
     {
+        $theme = $this->sanitizeTheme($theme);
+        $name = $this->sanitizeConfigName($name);
+
         if (!$name || !$theme || !$this->configExists($theme, $name)) {
             die("Invalid theme or config name");
         } else {
             if ($this->input->post()) {
-                $fusionConfig = new ConfigEditor("application/themes/" . $theme . "/config/" . $name . ".php");
+                $fusionConfig = new ConfigEditor($this->getConfigPath($theme, $name));
 
                 foreach ($this->input->post() as $key => $value) {
                     $fusionConfig->set($key, $value);
@@ -169,17 +172,21 @@ class EditTheme extends MX_Controller
 
     public function saveSource($theme = false, $name = false)
     {
+        $theme = $this->sanitizeTheme($theme);
+        $name = $this->sanitizeConfigName($name);
+
         if (!$name || !$theme || !$this->configExists($theme, $name)) {
             die("Invalid theme or config name");
         } else {
             if ($this->input->post("source")) {
-                $file = fopen("application/themes/" . $theme . "/config/" . $name . ".php", "w");
-                fwrite($file, $this->input->post("source"));
-                fclose($file);
+                try {
+                    $source = ConfigEditor::patchSource($this->input->post("source"));
 
-                $file = file("application/themes/" . $theme . "/config/" . $name . ".php");
-                $file[0] = str_replace("&lt;", "<", $file[0]);
-                file_put_contents("application/themes/" . $theme . "/config/" . $name . ".php", $file);
+                    // Only write source after strict validation and value patching.
+                    file_put_contents($this->getConfigPath($theme, $name), $source, LOCK_EX);
+                } catch (InvalidArgumentException $e) {
+                    die($e->getMessage());
+                }
 
                 die("yes");
             } else {
@@ -188,21 +195,48 @@ class EditTheme extends MX_Controller
         }
     }
 
-    private function configExists($theme, $file)
+    private function configExists(string $theme, string $file): bool
     {
-        if (file_exists("application/themes/" . $theme . "/config/" . $file . ".php")) {
+        if (file_exists($this->getConfigPath($theme, $file))) {
             return true;
         } else {
             return false;
         }
     }
 
-    public function hasConfigs($theme)
+    public function hasConfigs(string $theme): bool
     {
-        if (file_exists("application/themes/" . $theme . "/config")) {
+        if (file_exists('application/themes/' . $theme . '/config')) {
             return true;
         } else {
             return false;
         }
+    }
+
+    private function getConfigPath(string $theme, string $file): string
+    {
+        return 'application/themes/' . $theme . '/config/' . $file . '.php';
+    }
+
+    private function sanitizeTheme(string $theme): false|string
+    {
+        $theme = basename($theme);
+
+        if ($theme === '' || !is_dir('application/themes/' . $theme)) {
+            return false;
+        }
+
+        return $theme;
+    }
+
+    private function sanitizeConfigName(string $name): false|string
+    {
+        $name = basename($name);
+
+        if (!preg_match('/^[A-Za-z0-9_-]+$/', $name)) {
+            return false;
+        }
+
+        return $name;
     }
 }

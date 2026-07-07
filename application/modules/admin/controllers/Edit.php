@@ -139,21 +139,24 @@ class Edit extends MX_Controller
     /**
      * Get the config name out of the path
      *
-     * @param  String $path
+     * @param String $path
      * @return String
      */
-    private function getConfigName($path = "")
+    private function getConfigName(string $path = ""): string
     {
         return preg_replace("/application\/modules\/" . $this->module . "\/config\/([A-Za-z0-9_-]*)\.php/", "$1", $path);
     }
 
     public function save($module = false, $name = false)
     {
+        $module = $this->sanitizeModule($module);
+        $name = $this->sanitizeConfigName($name);
+
         if (!$name || !$module || !$this->configExists($module, $name)) {
             die("Invalid module or config name");
         } else {
             if ($this->input->post()) {
-                $fusionConfig = new ConfigEditor("application/modules/" . $module . "/config/" . $name . ".php");
+                $fusionConfig = new ConfigEditor($this->getConfigPath($module, $name));
 
                 foreach ($this->input->post() as $key => $value) {
                     $fusionConfig->set($key, $value);
@@ -170,17 +173,21 @@ class Edit extends MX_Controller
 
     public function saveSource($module = false, $name = false)
     {
+        $module = $this->sanitizeModule($module);
+        $name = $this->sanitizeConfigName($name);
+
         if (!$name || !$module || !$this->configExists($module, $name)) {
             die("Invalid module or config name");
         } else {
             if ($this->input->post("source")) {
-                $file = fopen("application/modules/" . $module . "/config/" . $name . ".php", "w");
-                fwrite($file, $this->input->post("source"));
-                fclose($file);
+                try {
+                    $source = ConfigEditor::patchSource($this->input->post("source"));
 
-                $file = file("application/modules/" . $module . "/config/" . $name . ".php");
-                $file[0] = str_replace("&lt;", "<", $file[0]);
-                file_put_contents("application/modules/" . $module . "/config/" . $name . ".php", $file);
+                    // Only write source after strict validation and value patching.
+                    file_put_contents($this->getConfigPath($module, $name), $source, LOCK_EX);
+                } catch (InvalidArgumentException $e) {
+                    die($e->getMessage());
+                }
 
                 die("yes");
             } else {
@@ -189,12 +196,39 @@ class Edit extends MX_Controller
         }
     }
 
-    private function configExists($module, $file)
+    private function configExists(string $module, string $file): bool
     {
-        if (file_exists("application/modules/" . $module . "/config/" . $file . ".php")) {
+        if (file_exists($this->getConfigPath($module, $file))) {
             return true;
         } else {
             return false;
         }
+    }
+
+    private function getConfigPath(string $module, string $file): string
+    {
+        return 'application/modules/' . $module . '/config/' . $file . '.php';
+    }
+
+    private function sanitizeModule(string $module): false|string
+    {
+        $module = basename($module);
+
+        if ($module === '' || !is_dir('application/modules/' . $module)) {
+            return false;
+        }
+
+        return $module;
+    }
+
+    private function sanitizeConfigName(string $name): false|string
+    {
+        $name = basename($name);
+
+        if (!preg_match('/^[A-Za-z0-9_-]+$/', $name)) {
+            return false;
+        }
+
+        return $name;
     }
 }
